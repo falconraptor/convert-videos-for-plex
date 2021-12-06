@@ -144,16 +144,16 @@ for i in "${path}"{,**/}*.*; do
     # Prevent processing on non-files
     if [[ $i !=  *\*.* ]]; then
         # Loop over avi, mkv, iso, img, mp4 and m4v files only.
-        if [[ $i == *.avi || $i == *.mkv || $i == *.iso || $i == *.img || $i == *.mp4 || $i == *.m4v ]]; then
+        if [[ $i == *.avi || $i == *.mkv || $i == *.iso || $i == *.img || $i == *.mp4 || $i == *.m4v || $i == *.ts ]]; then
             ((count++))
 
             lockPath="${i}.lock"
-                    
+
             if [[ -f "${lockPath}" ]]; then
                 echo -e "${BLUE}Lockfile for $i exists. Skipping.${NC}"
                 continue
             fi
-            
+
             if [[ $run == true ]]; then
                 touch "${lockPath}"
             fi
@@ -161,14 +161,18 @@ for i in "${path}"{,**/}*.*; do
             echo
             echo "${count}) Checking: "$i
 
+            format=$(mediainfo --Inform="Video;%Format%" "$i")
+
             if [[ ($audio != "" || $subtitle != "")
-                || $(mediainfo --Inform="Video;%Format%" "$i") == *$codec* 
-                || $(mediainfo --Inform="Video;%Format%" "$i") == "HEVC" 
-                || $(mediainfo --Inform="Video;%Format%" "$i") == "xvid" 
-                || ($(mediainfo --Inform="Video;%Format%" "$i") == "AVC" 
+                || $format == *$codec*
+                || $format == "HEVC"
+                || $format == "xvid"
+                || $format == "MPEG Video"
+                || ($format == "AVC"
                     && ($(mediainfo --Inform="Video;%Format_Profile%" "$i") == *"@L5"*))
+                || $(wc -c < "$i") -gt 1610612736
                 ]]; then
-		
+
                 # Set audio options to defaults if required
                 if [[ $audio == "" ]]; then
                     audio="--audio-lang-list 'und' --all-audio"
@@ -217,7 +221,7 @@ for i in "${path}"{,**/}*.*; do
                 echo "Transcoding: "${i} to $name$ext
 
                 if [[ $run == true ]]; then
-                    
+
                     # Set file locations: in situ or separate workspace
                     if [[ $workspace == "" ]]; then
                         fileIn="${i}"
@@ -261,9 +265,9 @@ for i in "${path}"{,**/}*.*; do
                     echo -e "${GREEN}Transcoded (DRY RUN):${NC} "$name$ext
                 fi
             else
-                currentFormat=$(mediainfo --Inform="Video;%Format%" "$i")
+                # currentFormat=$(mediainfo --Inform="Video;%Format%" "$i")
                 currentProfile=$(mediainfo --Inform="Video;%Format_Profile%" "$i")
-                echo -e "${RED}Skipping (video format ${currentFormat} ${currentProfile} will already play in Plex)${NC}"
+                echo -e "${RED}Skipping (video format ${format} ${currentProfile} will already play in Plex)${NC}"
             fi
 
             removeLock "${lockPath}"
@@ -271,4 +275,4 @@ for i in "${path}"{,**/}*.*; do
     fi
 done
 
-exit 0
+# exit 0
