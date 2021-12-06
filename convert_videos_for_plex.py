@@ -145,13 +145,13 @@ class Converter:
                         eta = f' [ETA: ~{mean(time_avg[duration]) / 60:.0f} min]'
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
                     if self.run:
-                        tmp = copy(file)
+                        tmp = Path(file)
+                        tmp_out = new_file.with_name(f'{new_file.stem}_processing.mp4')
                         if self.workspace:
                             print(COLOR.BLUE.write(f"Copying '{file.name}' to '{self.workspace}'"))
-                            new_file = Path(self.workspace, new_file.name)
-                            shutil.copyfile(file, new_file)
+                            tmp_out = Path(self.workspace, new_file.name)
                             tmp = Path(self.workspace, file.name)
-                        tmp_out = new_file.with_name(f'{new_file.stem}_processing.mp4')
+                            shutil.copyfile(file, tmp)
                         start = timeit.default_timer()
                         handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                         if handbrake.returncode != 0:
