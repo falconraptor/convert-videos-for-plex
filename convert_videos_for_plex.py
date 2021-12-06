@@ -176,7 +176,6 @@ class Converter:
                         print(COLOR.GREEN.write(f'Transcoded (DRY RUN): {new_file.name}'))
                 else:
                     print(COLOR.RED.write(f'Skipping (video format {format} {profile} will already play in Plex)'))
-            break
 
     @staticmethod
     def cli() -> 'Converter':
