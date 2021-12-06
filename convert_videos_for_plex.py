@@ -5,7 +5,6 @@ import subprocess
 import sys
 import timeit
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from copy import copy
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
@@ -30,12 +29,13 @@ class COLOR(str, Enum):
 class LockFile:
     def __init__(self, file: Path):
         self.lock_file = file.with_suffix('.lock')
+        self._touched = False
 
     def __enter__(self) -> 'LockFile':
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.lock_file.exists():
+        if self._touched:
             self.lock_file.unlink()
 
     def exists(self) -> bool:
@@ -43,6 +43,7 @@ class LockFile:
 
     def touch(self):
         self.lock_file.touch()
+        self._touched = True
 
 
 class Converter:
@@ -62,7 +63,7 @@ class Converter:
 
     def get_files(self) -> list[Path]:
         files = []
-        for ext in ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts'):
+        for ext in ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts'):  # Loop over avi, mkv, iso, img, mp4 and m4v files only.
             files.extend(_.resolve() for _ in self.input.glob(f'**/*.{ext}'))
         print(COLOR.GREEN.write(f'{len(files)}'))
         files.sort()
@@ -146,10 +147,10 @@ class Converter:
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
                     if self.run:
                         tmp = Path(file)
-                        tmp_out = new_file.with_name(f'{new_file.stem}_processing.mp4')
+                        tmp_out = new_file.with_stem(new_file.stem)
                         if self.workspace:
                             print(COLOR.BLUE.write(f"Copying '{file.name}' to '{self.workspace}'"))
-                            tmp_out = Path(self.workspace, new_file.name)
+                            tmp_out = Path(self.workspace, tmp_out.name)
                             tmp = Path(self.workspace, file.name)
                             shutil.copyfile(file, tmp)
                         start = timeit.default_timer()
@@ -165,7 +166,6 @@ class Converter:
                         times.append(time)
                         if self.delete_original:
                             file.unlink()
-                        tmp_out = tmp_out.rename(tmp_out.with_stem(f'{new_file.stem}.mp4'))
                         if self.workspace:
                             print(COLOR.BLUE.write(f'Copying from workspace "{tmp_out.name}" to "{new_file}"'))
                             shutil.copyfile(tmp_out, new_file)
