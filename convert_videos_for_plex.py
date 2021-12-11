@@ -65,7 +65,7 @@ class File:
             if self.converter.force:
                 self.skip = (COLOR.RED.write(f"Overwriting: '{self.dest.name}'"))
             else:
-                if self.skip:
+                if self.converter.skip:
                     self.skip = (COLOR.RED.write(f"Skipping (already exists): '{self.dest.name}'"))
                 else:
                     self.ask = True
@@ -87,7 +87,7 @@ class File:
         return self
 
     def __lt__(self, other) -> bool:
-        return self.source.name < other.source.name
+        return self.source.__str__() < other.source.__str__()
 
     @property
     def name(self) -> str:
@@ -111,12 +111,17 @@ class Converter:
 
     def get_files(self) -> list[File]:
         files = []
-        for ext in ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts'):
+        exts = ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts')
+        exts_len = len(exts)
+        for i, ext in enumerate(exts):
+            print(COLOR.BLUE.write(f'Finding files step {i + 1} of {exts_len}: '), end='', flush=True)
+            amount = len(files)
             for source in self.input.glob(f'**/*.{ext}'):
                 file = File(source, self).check_file()
                 if not self.force and file.skip:
                     continue
                 files.append(file)
+            print(COLOR.GREEN.write(f'Found {len(files) - amount}'))
         print(COLOR.GREEN.write(f'{len(files)}'))
         return sorted(files)
 
