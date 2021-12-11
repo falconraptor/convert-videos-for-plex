@@ -203,6 +203,10 @@ class Converter:
                         avg = mean(queue_data['times'])
                     eta = f' [Queue ETA: ~{(avg * (count - i)) / 60:.0f} min]'
                 print(COLOR.BLUE.write(f"Checking [{i.__str__().rjust(count_len, '0')}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
+                file.check_file()
+                if file.skip and not self.force:
+                    print(file.skip)
+                    continue
                 new_file = file.dest
                 if file.ask:
                     while reply := input(f"'{new_file.name}' already exists, do you wish to overwrite it [y|n]? ").lower() in ('y', 'n'):
@@ -231,6 +235,8 @@ class Converter:
                         handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                         if handbrake.returncode != 0:
                             print(COLOR.RED.write(f'HandBrakeCLI exited with code: {handbrake.returncode}'))
+                            if file.dest.exists():
+                                file.dest.unlink()
                             continue
                         time = timeit.default_timer() - start
                         try:
