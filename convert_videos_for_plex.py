@@ -15,6 +15,9 @@ from zipfile import ZipFile
 import requests as requests
 from pymediainfo import MediaInfo
 
+MILLISEC_TO_MIN = 60000
+FATAL_ERROR = 127
+
 
 class COLOR(str, Enum):
     RED = '\033[0;31m'
@@ -27,8 +30,8 @@ class COLOR(str, Enum):
 
 
 class LockFile:
-    def __init__(self, file: Path):
-        self.lock_file = file.with_suffix('.lock')
+    def __init__(self, file: 'File'):
+        self.lock_file = file.source.with_suffix('.lock')
         self._touched = False
 
     def __enter__(self) -> 'LockFile':
@@ -46,6 +49,51 @@ class LockFile:
         self._touched = True
 
 
+class File:
+    def __init__(self, source: Path, converter: 'Converter'):
+        self.source = source
+        self.dest = source.with_suffix('.mp4')
+        self.converter = converter
+        if self.converter.output:
+            self.dest = Path(self.converter.output, self.dest.name)
+        self.skip = ''
+        self.ask = False
+        self.run = False
+
+    def check_file(self) -> 'File':
+        if self.dest.exists():
+            if self.converter.force:
+                self.skip = (COLOR.RED.write(f"Overwriting: '{self.dest.name}'"))
+            else:
+                if self.skip:
+                    self.skip = (COLOR.RED.write(f"Skipping (already exists): '{self.dest.name}'"))
+                else:
+                    self.ask = True
+        return self
+
+    def check_info(self) -> 'File':
+        self.media_info = MediaInfo.parse(self.source)
+        if not self.media_info.video_tracks:
+            self.skip = COLOR.RED.write(f"Skipping (missing info): '{self.name}'")
+            return self
+        format = self.media_info.video_tracks[0].format
+        profile = self.media_info.video_tracks[0].format_profile
+        self.duration = float(self.media_info.video_tracks[0].duration) / MILLISEC_TO_MIN
+        self.duration_min = math.ceil(self.duration / 10) * 10
+        if self.converter.audio_track or self.converter.subtitle_track or format in ('HEVC', 'xvid', 'MPEG Video') or self.converter.codec in format or (format == 'AVC' and '@L5' in profile):
+            self.run = True
+        else:
+            self.skip = COLOR.RED.write(f'Skipping (video format {format} {profile} will already play in Plex)')
+        return self
+
+    def __lt__(self, other) -> bool:
+        return self.source.name < other.source.name
+
+    @property
+    def name(self) -> str:
+        return self.source.name
+
+
 class Converter:
     def __init__(self, input: str = '.', output: str = None, workspace: str = None, run: bool = False, skip: bool = False, codec: str = 'MPEG-4', delete_original: bool = False, force: bool = False, audio_track: int = 0, subtitle_track: int = 0, preset: str = 'Fast 1080p30'):
         self.input = Path(input).resolve()
@@ -61,16 +109,21 @@ class Converter:
         self.preset = preset
         print(COLOR.BLUE.write("TRANSCODING" if self.run else "DRY RUN"))
 
-    def get_files(self) -> list[Path]:
+    def get_files(self) -> list[File]:
         files = []
-        for ext in ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts'):  # Loop over avi, mkv, iso, img, mp4 and m4v files only.
-            files.extend(_.resolve() for _ in self.input.glob(f'**/*.{ext}'))
+        for ext in ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts'):
+            for source in self.input.glob(f'**/*.{ext}'):
+                file = File(source, self).check_file()
+                if not self.force and file.skip:
+                    continue
+                files.append(file)
         print(COLOR.GREEN.write(f'{len(files)}'))
-        files.sort()
-        return files
+        return sorted(files)
 
     @staticmethod
-    def get_command():
+    def get_handbrake_command():
+        if hasattr(Converter.get_handbrake_command, 'command'):
+            return Converter.get_handbrake_command.command
         command = 'HandBrakeCLI'
         if sys.platform == 'win32':
             command += '.exe'
@@ -78,7 +131,7 @@ class Converter:
                 if Path(path, command).exists():
                     break
             else:
-                print(COLOR.RED.write('HandBrakeCLI.exe not found, downloading'))
+                print(COLOR.RED.write(f'{command} not found, downloading'))
                 version = requests.get('https://github.com/HandBrake/HandBrake/releases/latest').url.split('/')[-1]
                 ZipFile(BytesIO(requests.get(f'https://github.com/HandBrake/HandBrake/releases/download/{version}/HandBrakeCLI-{version}-win-x86_64.zip').content)).extract('HandBrakeCLI.exe')
         else:
@@ -87,8 +140,32 @@ class Converter:
                     break
             else:
                 print(COLOR.RED.write('HandBrakeCLI is not installed, please install it using the instructions in the README.md'))
-                exit(127)
+                exit(FATAL_ERROR)
+        Converter.get_handbrake_command.command = command
         return command
+
+    # @staticmethod
+    # def get_mediainfo_command():
+    #     if hasattr(Converter.get_mediainfo_command, 'command'):
+    #         return Converter.get_mediainfo_command.command
+    #     command = 'mediainfo'
+    #     if sys.platform == 'win32':
+    #         command = 'MediaInfo.exe'
+    #         for path in [Path('.').resolve()] + os.path.expandvars('$PATH').split(';'):
+    #             if Path(path, command).exists():
+    #                 break
+    #         else:
+    #             print(COLOR.RED.write(f'{command} not found, downloading'))
+    #         ZipFile(BytesIO(requests.get('https://mediaarea.net/download/binary/mediainfo/21.09/MediaInfo_CLI_21.09_Windows_x64.zip').content)).extract('MediaInfo.exe')
+    #     else:
+    #         for path in os.path.expandvars('$PATH').split(';'):
+    #             if Path(path, command).exists():
+    #                 break
+    #         else:
+    #             print(COLOR.RED.write('HandBrakeCLI is not installed, please install it using the instructions in the README.md'))
+    #             exit(FATAL_ERROR)
+    #     Converter.get_mediainfo_command.command = command
+    #     return command
 
     def convert(self):
         audio = ['--audio', self.audio_track] if self.audio_track else ['--audio-lang-list', 'und', '--all-audio']
@@ -97,62 +174,54 @@ class Converter:
         count = len(files)
         count_len = len(str(count))
         time_avg = {}
-        command = self.get_command()
-        times = []
+        command = self.get_handbrake_command()
+        queue_data = {'times': [], 'durations': []}
         for i, file in enumerate(files):
+            if file.skip and not self.force:
+                print(file.skip)
+                continue
             with LockFile(file) as lock:
                 if lock.exists():
                     print(COLOR.RED.write(f"Lockfile for '{file.name}' exists, skipping"))
                     continue
-                new_file = file.with_suffix('.mp4')
-                if self.output:
-                    new_file = Path(self.output, new_file.name)
                 if self.run:
                     lock.touch()
                 i += 1
                 eta = ''
-                if len(times) >= 2:
-                    eta = f' [Queue ETA: ~{mean(times) / 60 * (count - i + 1):.0f} min]'
+                if len(queue_data['times']) >= 2:
+                    duration = math.ceil(mean(queue_data['durations']) / 10) * 10
+                    for dur, avg in time_avg.items():
+                        if dur == duration:
+                            avg = mean(avg)
+                            break
+                    else:
+                        avg = mean(queue_data['times'])
+                    eta = f' [Queue ETA: ~{(avg * (count - i)) / 60:.0f} min]'
                 print(COLOR.BLUE.write(f"Checking [{i.__str__().rjust(count_len, '0')}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
-                try:
-                    media_info = MediaInfo.parse(file)
-                except FileNotFoundError:
-                    print(COLOR.RED.write(f"Skipping (not found): '{file.name}'"))
-                    continue
-                if not media_info.video_tracks:
-                    print(COLOR.RED.write(f"Skipping (missing info): '{file.name}'"))
-                    continue
-                format = media_info.video_tracks[0].format
-                profile = media_info.video_tracks[0].format_profile
-                duration = math.ceil(float(media_info.video_tracks[0].duration) / 600000) * 10
-                if self.audio_track or self.subtitle_track or format in ('HEVC', 'xvid', 'MPEG Video') or self.codec in format or (format == 'AVC' and '@L5' in profile):
-                    if new_file.exists():
-                        if self.force:
-                            print(COLOR.RED.write(f"Overwriting: '{new_file.name}'"))
-                        else:
-                            if self.skip:
-                                print(COLOR.RED.write(f"Skipping (already exists): '{new_file.name}'"))
-                                continue
-                            else:
-                                while reply := input(f"'{new_file.name}' already exists, do you wish to overwrite it [y|n]? ").lower() in ('y', 'n'):
-                                    pass
-                                if reply == 'y':
-                                    print(COLOR.RED.write(f"Overwriting: '{new_file.name}'"))
-                                elif reply == 'n':
-                                    print(COLOR.RED.write(f"Skipping (already exists): '{new_file.name}'"))
-                                    continue
+                new_file = file.dest
+                if file.ask:
+                    while reply := input(f"'{new_file.name}' already exists, do you wish to overwrite it [y|n]? ").lower() in ('y', 'n'):
+                        pass
+                    if reply == 'y':
+                        print(COLOR.RED.write(f"Overwriting: '{new_file.name}'"))
+                    elif reply == 'n':
+                        print(COLOR.RED.write(f"Skipping (already exists): '{new_file.name}'"))
+                        continue
+                file.check_info()
+                if file.run:
                     eta = ''
+                    duration = file.duration_min
                     if len(time_avg.get(duration, [])) >= 2:
                         eta = f' [ETA: ~{mean(time_avg[duration]) / 60:.0f} min]'
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
                     if self.run:
-                        tmp = Path(file)
+                        tmp = Path(file.source)
                         tmp_out = new_file.with_stem(new_file.stem)
                         if self.workspace:
                             print(COLOR.BLUE.write(f"Copying '{file.name}' to '{self.workspace}'"))
                             tmp_out = Path(self.workspace, tmp_out.name)
                             tmp = Path(self.workspace, file.name)
-                            shutil.copyfile(file, tmp)
+                            shutil.copyfile(file.source, tmp)
                         start = timeit.default_timer()
                         handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                         if handbrake.returncode != 0:
@@ -163,19 +232,21 @@ class Converter:
                             time_avg[duration].append(time)
                         except KeyError:
                             time_avg[duration] = [time]
-                        times.append(time)
+                        queue_data['times'].append(time)
+                        queue_data['durations'].append(file.duration)
                         if self.delete_original:
-                            file.unlink()
+                            file.source.unlink()
                         if self.workspace:
                             print(COLOR.BLUE.write(f'Copying from workspace "{tmp_out.name}" to "{new_file}"'))
                             shutil.copyfile(tmp_out, new_file)
                             tmp.unlink()
                             tmp_out.unlink()
-                        print(COLOR.GREEN.write(f'Transcoded: {new_file.name}'))
+                        print(COLOR.GREEN.write(f'Transcoded [~{time / 60:.0f} min]: {new_file.name}'))
                     else:
                         print(COLOR.GREEN.write(f'Transcoded (DRY RUN): {new_file.name}'))
-                else:
-                    print(COLOR.RED.write(f'Skipping (video format {format} {profile} will already play in Plex)'))
+                elif file.skip:
+                    print(file.skip)
+            pass
 
     @staticmethod
     def cli() -> 'Converter':
