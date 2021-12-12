@@ -238,11 +238,11 @@ class Converter:
                         try:
                             handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
                         except BaseException as e:
-                            print(COLOR.RED.write(f'HandBrakeCLI exited with code: {handbrake.returncode}'))
                             if file.dest.exists():
                                 file.dest.unlink()
                             if not isinstance(e, subprocess.CalledProcessError):
                                 raise e
+                            print(COLOR.RED.write(f'HandBrakeCLI exited with code: {handbrake.returncode}'))
                             continue
                         time = timeit.default_timer() - start
                         try:
