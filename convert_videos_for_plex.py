@@ -144,8 +144,11 @@ class Converter:
                 if Path(path, command).exists():
                     break
             else:
-                print(COLOR.RED.write('HandBrakeCLI is not installed, please install it using the instructions in the README.md'))
-                exit(FATAL_ERROR)
+                try:
+                    subprocess.run(['HandBrakeCLI'], check=True, capture_output=True)
+                except subprocess.CalledProcessError:
+                    print(COLOR.RED.write('HandBrakeCLI is not installed, please install it using the instructions in the README.md'))
+                    exit(FATAL_ERROR)
         Converter.get_handbrake_command.command = command
         return command
 
@@ -232,11 +235,14 @@ class Converter:
                             tmp = Path(self.workspace, file.name)
                             shutil.copyfile(file.source, tmp)
                         start = timeit.default_timer()
-                        handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        if handbrake.returncode != 0:
+                        try:
+                            handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
+                        except BaseException as e:
                             print(COLOR.RED.write(f'HandBrakeCLI exited with code: {handbrake.returncode}'))
                             if file.dest.exists():
                                 file.dest.unlink()
+                            if not isinstance(e, subprocess.CalledProcessError):
+                                raise e
                             continue
                         time = timeit.default_timer() - start
                         try:
