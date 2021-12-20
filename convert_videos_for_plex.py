@@ -78,7 +78,7 @@ class File:
             return self
         format = self.media_info.video_tracks[0].format
         profile = self.media_info.video_tracks[0].format_profile
-        self.duration = float(self.media_info.video_tracks[0].duration) / MILLISEC_TO_MIN
+        self.duration = float(self.media_info.video_tracks[0].duration or 0) / MILLISEC_TO_MIN
         self.duration_min = math.ceil(self.duration / 10) * 10
         if self.converter.audio_track or self.converter.subtitle_track or format in ('HEVC', 'xvid', 'MPEG Video') or self.converter.codec in format or (format == 'AVC' and '@L5' in profile):
             self.run = True
