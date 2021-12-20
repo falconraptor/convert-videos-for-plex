@@ -194,7 +194,6 @@ class Converter:
                     continue
                 if self.run:
                     lock.touch()
-                i += 1
                 eta = ''
                 if len(queue_data['times']) >= 2:
                     duration = math.ceil(mean(queue_data['durations']) / 10) * 10
@@ -205,6 +204,7 @@ class Converter:
                     else:
                         avg = mean(queue_data['times'])
                     eta = f' [Queue ETA: ~{(avg * (count - i)) / 60:.0f} min]'
+                i += 1
                 print(COLOR.BLUE.write(f"Checking [{i.__str__().rjust(count_len, '0')}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
                 file.check_file()
                 if file.skip and not self.force:
@@ -236,13 +236,13 @@ class Converter:
                             shutil.copyfile(file.source, tmp)
                         start = timeit.default_timer()
                         try:
-                            handbrake = subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
+                            subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
                         except BaseException as e:
                             if file.dest.exists():
                                 file.dest.unlink()
                             if not isinstance(e, subprocess.CalledProcessError):
                                 raise e
-                            print(COLOR.RED.write(f'HandBrakeCLI exited with code: {handbrake.returncode}'))
+                            print(COLOR.RED.write(f'HandBrakeCLI exited with code [{e.returncode}] and stderr: {e.stderr}'))
                             continue
                         time = timeit.default_timer() - start
                         try:
