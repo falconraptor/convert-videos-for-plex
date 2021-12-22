@@ -176,8 +176,8 @@ class Converter:
     #     return command
 
     def convert(self):
-        audio = ['--audio', self.audio_track] if self.audio_track else ['--audio-lang-list', 'und', '--all-audio']
-        subtitle = ['--subtitle', self.subtitle_track, '--subtitle_burned'] if self.subtitle_track else ['-s', 'scan']
+        audio = ['--audio', self.audio_track] if self.audio_track != 0 else ['--all-audio']
+        subtitle = ['--subtitle', self.subtitle_track, '--subtitle_burned'] if self.subtitle_track != 0 else ['-s', 'scan']
         files = self.get_files()
         count = len(files)
         count_len = len(str(count))
