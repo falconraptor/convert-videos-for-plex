@@ -48,6 +48,9 @@ class LockFile:
         self.lock_file.touch()
         self._touched = True
 
+    def __repr__(self):
+        return f'<LockFile {self.lock_file=} {self._touched=}>'
+
 
 class File:
     def __init__(self, source: Path, converter: 'Converter'):
@@ -92,6 +95,9 @@ class File:
     @property
     def name(self) -> str:
         return self.source.name
+
+    def __repr__(self):
+        return f'<File {self.source=}>'
 
 
 class Converter:
@@ -263,7 +269,6 @@ class Converter:
                         print(COLOR.GREEN.write(f'Transcoded (DRY RUN): {new_file.name}'))
                 elif file.skip:
                     print(file.skip)
-            pass
 
     @staticmethod
     def cli() -> 'Converter':
@@ -289,7 +294,7 @@ class Converter:
         parser.add_argument('-i', default='.', help='The directory path of the videos to be tidied [.]', metavar='PATH', dest='input')
         parser.add_argument('-q', default='Fast 1080p30', help='Quality of HandBrake encoding preset. List of presets: https://handbrake.fr/docs/en/latest/technical/official-presets.html [Fast 1080p30]', metavar='PRESET', dest='preset')
         parser.add_argument('-r', action='store_true', help='Run transcoding. Exclude for dry run', dest='run')
-        parser.add_argument('-s', action='store_true', help='Skip transcoding if there is alread a matching filename in the output destination. Force takes precedence', dest='skip')
+        parser.add_argument('-s', action='store_true', help='Skip transcoding if there is already a matching filename in the output destination. Force takes precedence', dest='skip')
         parser.add_argument('-w', default=None, help='Workspace directory path for processing', dest='workspace')
         return Converter(**parser.parse_args().__dict__)
 
