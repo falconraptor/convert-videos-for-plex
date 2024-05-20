@@ -145,7 +145,7 @@ class Converter:
 
     def get_files(self) -> list[File]:
         files = []
-        exts = ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts')
+        exts = ('avi', 'mkv', 'iso', 'img', 'm4v', 'ts')
         exts_len = len(exts)
         for i, ext in enumerate(exts):
             print(COLOR.BLUE.write(f'Finding files step {i + 1} of {exts_len} [{ext}]: '), end='', flush=True)
@@ -153,8 +153,8 @@ class Converter:
             skipping = 0
             for source in self.input.glob(f'**/*.{ext}'):
                 file = File(source, self).check_output_exists()
-                if not file.skip:
-                    file.check_media_info(self.preset)
+                # if not file.skip:
+                #     file.check_media_info(self.preset)
                 if not self.force and file.skip:
                     skipping += 1
                     continue
@@ -235,7 +235,11 @@ class Converter:
                     print(file.skip)
                     continue
                 new_file = file.dest
-                file.check_media_info(self.preset)
+                try:
+                    file.check_media_info(self.preset)
+                except RuntimeError as e:
+                    print(COLOR.RED.write(f'ERROR: {e.__repr__()}'))
+                    continue
                 if file.run:
                     eta = ''
                     duration = file.duration_min
@@ -311,7 +315,7 @@ class Converter:
         parser.add_argument('-w', '--workspace', default=None, help='Workspace directory path for processing', dest='workspace')
         parser.add_argument('--sort_type', default='Name', help='Run in sort order [Name]', choices=['Name', 'Duration', 'Filesize', 'Modified'], dest='sort_type')
         parser.add_argument('--sort_direction', default='DESC', help='Sort direction [DESC]', choices=['ASC', 'DESC'], dest='sort_direction')
-        parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, iso, img, mp4, m4v, ts]', action='extend', dest='extensions')
+        parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, iso, img, m4v, ts]', action='extend', dest='extensions')
         parser.add_argument('--exclude', help='Files or directories to exclude (regex)', action='extend', dest='exclude', metavar='FILE_DIR_REGEX')
         parser.add_argument('-f', action='store_true', help='Force overwriting of files if already exist in output destination', dest='force')
         parser.add_argument('--stop_larger', help='Quit if output is larger than input (should only use if sort_type=Filesize)', action='store_true', dest='stop_larger')
