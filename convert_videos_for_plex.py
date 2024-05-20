@@ -61,7 +61,6 @@ class File:
         if self.converter.output:
             self.dest = Path(self.converter.output, self.dest.name)
         self.skip = ''
-        self.ask = False
         self.run = False
         self.media_info = None
         self.duration_min = 0.0
@@ -75,10 +74,8 @@ class File:
         if self.dest.exists():
             if self.converter.force:
                 self.skip = COLOR.RED.write(f"Overwriting: '{self.dest.name}'")
-            elif self.converter.skip:
-                self.skip = COLOR.RED.write(f"Skipping (already exists): '{self.dest.name}'")
             else:
-                self.ask = True
+                self.skip = COLOR.RED.write(f"Skipping (already exists): '{self.dest.name}'")
         return self
 
     def get_duration(self) -> float:
@@ -90,7 +87,7 @@ class File:
         self.duration_min = math.ceil(self.duration / 10) * 10
         return self.duration
 
-    def check_media_info(self) -> 'File':
+    def check_media_info(self, preset: str) -> 'File':
         if self.skip:
             return self
         if not self.media_info:
@@ -102,10 +99,15 @@ class File:
         self.profile = self.media_info.video_tracks[0].format_profile
         if not self.duration_min:
             self.get_duration()
-        if self.format not in ('HEVC',):
-            self.run = True
-        else:
-            self.skip = COLOR.RED.write(f'Skipping (video format {self.format} {self.profile} will already play in Plex)')
+        match preset, self.format:
+            case 'H.265 VCN 1080p', 'HEVC':
+                pass
+            case 'Fast 1080p30', 'AVC':
+                pass
+            case _, _:
+                self.run = True
+        if not self.run:
+            self.skip = COLOR.RED.write(f'Skipping (video format {self.format} {self.profile} already requested)')
         return self
 
     def __lt__(self, other) -> bool:
@@ -152,7 +154,7 @@ class Converter:
             for source in self.input.glob(f'**/*.{ext}'):
                 file = File(source, self).check_output_exists()
                 if not file.skip:
-                    file.check_media_info()
+                    file.check_media_info(self.preset)
                 if not self.force and file.skip:
                     skipping += 1
                     continue
@@ -233,18 +235,7 @@ class Converter:
                     print(file.skip)
                     continue
                 new_file = file.dest
-                if file.ask:
-                    if self.run:
-                        while reply := input(f"'{new_file.name}' already exists, do you wish to overwrite it [y|n]? ").lower() not in ('y', 'n'):
-                            pass
-                        if reply == 'y':
-                            print(COLOR.RED.write(f"Overwriting: '{new_file.name}'"))
-                        elif reply == 'n':
-                            print(COLOR.RED.write(f"Skipping (already exists): '{new_file.name}'"))
-                            continue
-                    else:
-                        print(COLOR.RED.write(f"Skipping (will ask to overwrite): '{new_file.name}'"))
-                file.check_media_info()
+                file.check_media_info(self.preset)
                 if file.run:
                     eta = ''
                     duration = file.duration_min
