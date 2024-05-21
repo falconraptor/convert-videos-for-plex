@@ -5,6 +5,7 @@ import subprocess
 import sys
 import timeit
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from datetime import datetime
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
@@ -27,7 +28,7 @@ class COLOR(str, Enum):
     NC = '\033[0m'  # No Color
 
     def write(self, string: str) -> str:
-        return f'{self.value}{string}{self.NC.value}'
+        return f'{self.value}{datetime.now().strftime("%b %d %H:%M")}\t{string}{self.NC.value}'
 
 
 class LockFile:
@@ -199,6 +200,13 @@ class Converter:
         Converter.get_handbrake_command.command = command
         return command
 
+    @staticmethod
+    def calc_time(seconds: int | float):
+        seconds = int(seconds)
+        minutes = seconds // 60
+        hours = seconds // 3600
+        return f'{hours:02}H {minutes:02}M'
+
     def convert(self):
         audio = ['--audio', self.audio_track] if self.audio_track != 0 else ['--all-audio']
         subtitle = ['--subtitle', self.subtitle_track, '--subtitle_burned'] if self.subtitle_track != 0 else ['-s', 'scan']
@@ -227,7 +235,7 @@ class Converter:
                             break
                     else:
                         avg = mean(queue_data['times'])
-                    eta = f' [Queue ETA: ~{(avg * (count - i)) / 60:.0f} min]'
+                    eta = f' [Queue ETA: ~{self.calc_time(avg * (count - i))}]'
                 i += 1
                 print(COLOR.BLUE.write(f"Checking [{i:0{count_len}}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
                 file.check_output_exists()
@@ -244,7 +252,7 @@ class Converter:
                     eta = ''
                     duration = file.duration_min
                     if len(time_avg.get(duration, [])) >= 2:
-                        eta = f' [ETA: ~{mean(time_avg[duration]) / 60:.0f} min]'
+                        eta = f' [ETA: ~{self.calc_time(mean(time_avg[duration]))}]'
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
                     if self.run:
                         tmp = Path(file.source)
@@ -278,7 +286,7 @@ class Converter:
                             tmp_out.unlink()
                         original_size = file.source.stat().st_size
                         new_size = new_file.stat().st_size
-                        print(COLOR.GREEN.write(f'Transcoded [~{time / 60:.0f} min]: {new_file.name} [{new_size / original_size:03.2%}]'))
+                        print(COLOR.GREEN.write(f'Transcoded [~{self.calc_time(time)}]: {new_file.name} [{new_size / original_size:03.2%}]'))
                         if self.stop_larger and new_size > original_size:
                             print(COLOR.RED.write('Output > Input: STOPPING'))
                             file.dest.unlink()
