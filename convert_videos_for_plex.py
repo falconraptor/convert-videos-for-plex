@@ -1,6 +1,5 @@
 import math
 import os
-import shutil
 import subprocess
 import sys
 import timeit
@@ -123,10 +122,9 @@ class File:
 
 
 class Converter:
-    def __init__(self, input: str = '.', output: str = None, workspace: str = None, run: bool = False, delete_original: bool = False, force: bool = False, audio_track: int = 0, subtitle_track: int = 0, preset: str = 'Fast 1080p30', sort_type: str = 'Name', sort_direction: str = 'ASC', extensions: Iterable[str] = None, exclude: Iterable[str] = None, stop_larger: bool = False):
+    def __init__(self, input: str = '.', output: str = None, run: bool = False, delete_original: bool = False, force: bool = False, audio_track: int = 0, subtitle_track: int = 0, preset: str = 'Fast 1080p30', sort_type: str = 'Name', sort_direction: str = 'ASC', extensions: Iterable[str] = None, exclude: Iterable[str] = None, stop_larger: bool = False):
         self.input = Path(input).resolve()
         self.output = Path(output).resolve() if output else None
-        self.workspace = Path(workspace).resolve() if workspace else None
         self.run = run
         self.delete_original = delete_original
         self.force = force
@@ -200,13 +198,6 @@ class Converter:
         Converter.get_handbrake_command.command = command
         return command
 
-    @staticmethod
-    def calc_time(seconds: int | float):
-        seconds = int(seconds)
-        minutes = seconds // 60
-        hours = seconds // 3600
-        return f'{hours:02}H {minutes:02}M'
-
     def convert(self):
         audio = ['--audio', self.audio_track] if self.audio_track != 0 else ['--all-audio']
         subtitle = ['--subtitle', self.subtitle_track, '--subtitle_burned'] if self.subtitle_track != 0 else ['-s', 'scan']
@@ -235,7 +226,7 @@ class Converter:
                             break
                     else:
                         avg = mean(queue_data['times'])
-                    eta = f' [Queue ETA: ~{self.calc_time(avg * (count - i))}]'
+                    eta = f' [Queue ETA: ~{calc_time(avg * (count - i))}]'
                 i += 1
                 print(COLOR.BLUE.write(f"Checking [{i:0{count_len}}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
                 file.check_output_exists()
@@ -252,19 +243,12 @@ class Converter:
                     eta = ''
                     duration = file.duration_min
                     if len(time_avg.get(duration, [])) >= 2:
-                        eta = f' [ETA: ~{self.calc_time(mean(time_avg[duration]))}]'
+                        eta = f' [ETA: ~{calc_time(mean(time_avg[duration]))}]'
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
                     if self.run:
-                        tmp = Path(file.source)
-                        tmp_out = new_file.with_stem(new_file.stem)
-                        if self.workspace:
-                            print(COLOR.BLUE.write(f"Copying '{file.name}' to '{self.workspace}'"))
-                            tmp_out = Path(self.workspace, tmp_out.name)
-                            tmp = Path(self.workspace, file.name)
-                            shutil.copy2(file.source, tmp)
                         start = timeit.default_timer()
                         try:
-                            subprocess.run([command, '-i', tmp, '-o', tmp_out, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
+                            subprocess.run([command, '-i', file.source, '-o', new_file, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
                         except BaseException as e:
                             if file.dest.exists():
                                 file.dest.unlink()
@@ -279,14 +263,9 @@ class Converter:
                             time_avg[duration] = [time]
                         queue_data['times'].append(time)
                         queue_data['durations'].append(file.duration)
-                        if self.workspace:
-                            print(COLOR.BLUE.write(f'Copying from workspace "{tmp_out.name}" to "{new_file}"'))
-                            shutil.copy2(tmp_out, new_file)
-                            tmp.unlink()
-                            tmp_out.unlink()
                         original_size = file.source.stat().st_size
                         new_size = new_file.stat().st_size
-                        print(COLOR.GREEN.write(f'Transcoded [~{self.calc_time(time)}]: {new_file.name} [{new_size / original_size:03.2%}]'))
+                        print(COLOR.GREEN.write(f'Transcoded [~{calc_time(time)}]: {new_file.name} [{new_size / original_size:03.2%}]'))
                         if self.stop_larger and new_size > original_size:
                             print(COLOR.RED.write('Output > Input: STOPPING'))
                             file.dest.unlink()
@@ -298,37 +277,43 @@ class Converter:
                 elif file.skip:
                     print(file.skip)
 
-    @staticmethod
-    def cli() -> 'Converter':
-        parser = ArgumentParser(
-            description='Converts all videos in nested folders to h264 and audio to aac using HandBrake with the Normal preset. This saves Plex from having to transcode files which is CPU intensive',
-            epilog=textwrap.dedent('''
-            Examples:
-                Dry run all videos in the Movies directory
-                    python convert_videos_for_plex.py -i Movies
 
-                Transcode all videos in the current directory force overwriting matching .mp4 files.
-                    python convert_videos_for_plex.py -fr
+def cli() -> Converter:
+    parser = ArgumentParser(
+        description='Converts all videos in nested folders to h264 and audio to aac using HandBrake with the Normal preset. This saves Plex from having to transcode files which is CPU intensive',
+        epilog=textwrap.dedent('''
+        Examples:
+            Dry run all videos in the Movies directory
+                python convert_videos_for_plex.py -i Movies
 
-                Transcode all network videos using Desktop as temp directory and delete original files.
-                    python convert_videos_for_plex.py -rd -i /Volumes/Public/Movies -w ~/Desktop'''),
-            formatter_class=RawDescriptionHelpFormatter)
-        parser.add_argument('-a', '--audio_track', default='0', help='Select an audio track to use', type=int, metavar='TRACK', dest='audio_track', choices=[1, 2, 3, 4, 5])
-        parser.add_argument('-s', '--subtitle_track', default='0', help='Select a subtitle track to burn in', type=int, metavar='TRACK', dest='subtitle_track', choices=[1, 2, 3, 4, 5])
-        parser.add_argument('-d', '--delete_original', action='store_true', help='Delete original', dest='delete_original')
-        parser.add_argument('-o', '--output', default=None, help='Output folder directory path [Same as video]', metavar='OUTPUT', dest='output')
-        parser.add_argument('-i', '--input', default='.', help='The directory path of the videos to be tidied [.]', metavar='PATH', dest='input')
-        parser.add_argument('-p', '--preset', default='Fast 1080p30', help='Quality of HandBrake encoding preset. List of presets: https://handbrake.fr/docs/en/latest/technical/official-presets.html [Fast 1080p30]', metavar='PRESET', dest='preset')
-        parser.add_argument('-r', '--run', action='store_true', help='Run transcoding. Exclude for dry run', dest='run')
-        parser.add_argument('-w', '--workspace', default=None, help='Workspace directory path for processing', dest='workspace')
-        parser.add_argument('--sort_type', default='Name', help='Run in sort order [Name]', choices=['Name', 'Duration', 'Filesize', 'Modified'], dest='sort_type')
-        parser.add_argument('--sort_direction', default='DESC', help='Sort direction [DESC]', choices=['ASC', 'DESC'], dest='sort_direction')
-        parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, iso, img, m4v, ts]', action='extend', dest='extensions')
-        parser.add_argument('--exclude', help='Files or directories to exclude (regex)', action='extend', dest='exclude', metavar='FILE_DIR_REGEX')
-        parser.add_argument('-f', action='store_true', help='Force overwriting of files if already exist in output destination', dest='force')
-        parser.add_argument('--stop_larger', help='Quit if output is larger than input (should only use if sort_type=Filesize)', action='store_true', dest='stop_larger')
-        return Converter(**parser.parse_args().__dict__)
+            Transcode all videos in the current directory force overwriting matching .mp4 files.
+                python convert_videos_for_plex.py -fr
+
+            Transcode all network videos using Desktop as temp directory and delete original files.
+                python convert_videos_for_plex.py -rd -i /Volumes/Public/Movies -w ~/Desktop'''),
+        formatter_class=RawDescriptionHelpFormatter)
+    parser.add_argument('-a', '--audio_track', default='0', help='Select an audio track to use', type=int, metavar='TRACK', dest='audio_track', choices=[1, 2, 3, 4, 5])
+    parser.add_argument('-s', '--subtitle_track', default='0', help='Select a subtitle track to burn in', type=int, metavar='TRACK', dest='subtitle_track', choices=[1, 2, 3, 4, 5])
+    parser.add_argument('-d', '--delete_original', action='store_true', help='Delete original', dest='delete_original')
+    parser.add_argument('-o', '--output', default=None, help='Output folder directory path [Same as video]', metavar='OUTPUT', dest='output')
+    parser.add_argument('-i', '--input', default='.', help='The directory path of the videos to be tidied [.]', metavar='PATH', dest='input')
+    parser.add_argument('-p', '--preset', default='Fast 1080p30', help='Quality of HandBrake encoding preset. List of presets: https://handbrake.fr/docs/en/latest/technical/official-presets.html [Fast 1080p30]', metavar='PRESET', dest='preset')
+    parser.add_argument('-r', '--run', action='store_true', help='Run transcoding. Exclude for dry run', dest='run')
+    parser.add_argument('--sort_type', default='Name', help='Run in sort order [Name]', choices=['Name', 'Duration', 'Filesize', 'Modified'], dest='sort_type')
+    parser.add_argument('--sort_direction', default='DESC', help='Sort direction [DESC]', choices=['ASC', 'DESC'], dest='sort_direction')
+    parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, iso, img, m4v, ts]', action='extend', dest='extensions')
+    parser.add_argument('--exclude', help='Files or directories to exclude (regex)', action='extend', dest='exclude', metavar='FILE_DIR_REGEX')
+    parser.add_argument('-f', action='store_true', help='Force overwriting of files if already exist in output destination', dest='force')
+    parser.add_argument('--stop_larger', help='Quit if output is larger than input (should only use if sort_type=Filesize)', action='store_true', dest='stop_larger')
+    return Converter(**parser.parse_args().__dict__)
+
+
+def calc_time(seconds: int | float):
+    seconds = int(seconds)
+    minutes = seconds // 60
+    hours = seconds // 3600
+    return f'{hours:02}H {minutes:02}M'
 
 
 if __name__ == '__main__':
-    Converter.cli().convert()
+    cli().convert()
