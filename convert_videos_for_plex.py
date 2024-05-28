@@ -4,7 +4,7 @@ import subprocess
 import sys
 import timeit
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, Future
 from datetime import datetime
 from enum import Enum
 from io import BytesIO
@@ -27,8 +27,8 @@ class COLOR(str, Enum):
     BLUE = '\033[0;34m'
     NC = '\033[0m'  # No Color
 
-    def write(self, string: str) -> str:
-        return f'{self.value}{datetime.now().strftime("%b %d %H:%M")}\t{string}{self.NC.value}'
+    def write(self, string: str, skip_time: bool = False) -> str:
+        return f'{self.value}{datetime.now().strftime("%b %d %H:%M:%S") + '\t' if not skip_time else ''}{string}{self.NC.value}'
 
 
 class LockFile:
@@ -55,26 +55,25 @@ class LockFile:
 
 
 class File:
-    def __init__(self, source: Path, converter: 'Converter'):
+    def __init__(self, source: Path, output: Path = None, force: bool = False):
         self.source = source
         self.dest = source.with_suffix('.mp4')
-        self.converter = converter
-        if self.converter.output:
-            self.dest = Path(self.converter.output, self.dest.name)
+        if output:
+            self.dest = Path(output, self.dest.name)
         self.skip = ''
         self.run = False
-        self.media_info = None
+        self.media_info: MediaInfo = None
         self.duration_min = 0.0
         self.duration = 0
         self.format = ''
         self.profile = ''
-        self.checking_info = None
+        self.force = force
 
     def check_output_exists(self) -> 'File':
         if self.skip:
             return self
         if self.dest.exists():
-            if self.converter.force:
+            if self.force:
                 self.skip = COLOR.RED.write(f"Overwriting: '{self.dest.name}'")
             else:
                 self.skip = COLOR.RED.write(f"Skipping (already exists): '{self.dest.name}'")
@@ -89,16 +88,14 @@ class File:
         self.duration_min = math.ceil(self.duration / 10) * 10
         return self.duration
 
-    def check_media_info(self, preset: str) -> 'File':
+    def check_media_info(self, preset: str) -> tuple[str, bool]:
         if self.skip:
-            return self
+            return self.skip, self.run
         if not self.media_info:
             self.media_info = MediaInfo.parse(self.source)
         if not self.media_info.video_tracks:
             self.skip = COLOR.RED.write(f"Skipping (missing info): '{self.name}'")
-            return self
-        if self.checking_info:
-            return self.checking_info.result()
+            return self.skip, self.run
         self.format = self.media_info.video_tracks[0].format
         self.profile = self.media_info.video_tracks[0].format_profile
         if not self.duration_min:
@@ -112,10 +109,7 @@ class File:
                 self.run = True
         if not self.run:
             self.skip = COLOR.RED.write(f'Skipping (video format {self.format} {self.profile} already requested)')
-        return self
-
-    def __lt__(self, other) -> bool:
-        return self.source.__str__() < other.source.__str__()
+        return self.skip, self.run
 
     @property
     def name(self) -> str:
@@ -138,7 +132,7 @@ class Converter:
         self.sort_type = sort_type
         self.sort_direction = sort_direction
         if not extensions:
-            extensions = ('avi', 'mkv', 'iso', 'img', 'mp4', 'm4v', 'ts')
+            extensions = ('avi', 'mkv', 'iso', 'img', 'm4v', 'ts')
         self.extensions = extensions
         if not exclude:
             exclude = []
@@ -147,32 +141,31 @@ class Converter:
         print(COLOR.BLUE.write("TRANSCODING" if self.run else "DRY RUN"))
         self.check_pool = ProcessPoolExecutor(1)
 
-    def get_files(self) -> list[File]:
+    def get_files(self) -> list[tuple[File, Future]]:
         files = []
-        exts = ('avi', 'mkv', 'iso', 'img', 'm4v', 'ts')
-        exts_len = len(exts)
-        for i, ext in enumerate(exts):
+        exts_len = len(self.extensions)
+        for i, ext in enumerate(self.extensions):
             print(COLOR.BLUE.write(f'Finding files step {i + 1} of {exts_len} [{ext}]: '), end='', flush=True)
             amount = len(files)
             skipping = 0
             for source in self.input.glob(f'**/*.{ext}'):
-                file = File(source, self).check_output_exists()
-                file.checking_info = self.check_pool.submit(file.check_media_info, self.preset)
+                file = File(source, self.output, self.force).check_output_exists()
                 if not self.force and file.skip:
                     skipping += 1
                     continue
                 files.append(file)
-            print(COLOR.GREEN.write(f'Found {len(files) - amount}') + (COLOR.RED.write(f'\tSkipping {skipping}') if skipping else ''))
+            print(COLOR.GREEN.write(f'Found {len(files) - amount}', True) + (COLOR.RED.write(f'\tSkipping {skipping}', True) if skipping else ''))
         print(COLOR.GREEN.write(f'Total: {len(files)}'))
+        files = map(lambda f: (f, self.check_pool.submit(file.check_media_info, self.preset)), files)
         match self.sort_type:
             case 'Name':
-                return sorted(files, key=lambda f: f.name, reverse=self.sort_direction == 'DESC')
+                return sorted(files, key=lambda f: f[0].name, reverse=self.sort_direction == 'DESC')
             case 'Duration':
-                return sorted(files, key=lambda f: f.get_duration(), reverse=self.sort_direction == 'DESC')
+                return sorted(files, key=lambda f: f[0].get_duration(), reverse=self.sort_direction == 'DESC')
             case 'Filesize':
-                return sorted(files, key=lambda f: f.source.stat().st_size, reverse=self.sort_direction == 'DESC')
+                return sorted(files, key=lambda f: f[0].source.stat().st_size, reverse=self.sort_direction == 'DESC')
             case 'Modified':
-                return sorted(files, key=lambda f: f.source.stat().st_mtime, reverse=self.sort_direction == 'DESC')
+                return sorted(files, key=lambda f: f[0].source.stat().st_mtime, reverse=self.sort_direction == 'DESC')
         return sorted(files)
 
     @staticmethod
@@ -211,9 +204,10 @@ class Converter:
         time_avg = {}
         command = self.get_handbrake_command()
         queue_data = {'times': [], 'durations': []}
-        for i, file in enumerate(files):
+        for i, (file, checking_info) in enumerate(files):
             if file.skip and not self.force:
                 print(file.skip)
+                checking_info.cancel()
                 continue
             with LockFile(file) as lock:
                 if lock.exists():
@@ -233,13 +227,12 @@ class Converter:
                     eta = f' [Queue ETA: ~{calc_time(avg * (count - i))}]'
                 i += 1
                 print(COLOR.BLUE.write(f"Checking [{i:0{count_len}}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
-                file.check_output_exists()
                 if file.skip and not self.force:
                     print(file.skip)
+                    checking_info.cancel()
                     continue
-                new_file = file.dest
                 try:
-                    file.check_media_info(self.preset)
+                    file.skip, file.run = checking_info.result()
                 except RuntimeError as e:
                     print(COLOR.RED.write(f'ERROR: {e.__repr__()}'))
                     continue
@@ -248,11 +241,11 @@ class Converter:
                     duration = file.duration_min
                     if len(time_avg.get(duration, [])) >= 2:
                         eta = f' [ETA: ~{calc_time(mean(time_avg[duration]))}]'
-                    print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{new_file.name}'{eta}"))
+                    print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{file.dest.name}'{eta}"))
                     if self.run:
                         start = timeit.default_timer()
                         try:
-                            subprocess.run([command, '-i', file.source, '-o', new_file, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
+                            subprocess.run([command, '-i', file.source, '-o', file.dest, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
                         except BaseException as e:
                             if file.dest.exists():
                                 file.dest.unlink()
@@ -268,8 +261,8 @@ class Converter:
                         queue_data['times'].append(time)
                         queue_data['durations'].append(file.duration)
                         original_size = file.source.stat().st_size
-                        new_size = new_file.stat().st_size
-                        print(COLOR.GREEN.write(f'Transcoded [~{calc_time(time)}]: {new_file.name} [{new_size / original_size:03.2%}]'))
+                        new_size = file.dest.stat().st_size
+                        print(COLOR.GREEN.write(f'Transcoded [~{calc_time(time)}]: {file.dest.name} [{new_size / original_size:03.2%}]'))
                         if self.stop_larger and new_size > original_size:
                             print(COLOR.RED.write('Output > Input: STOPPING'))
                             file.dest.unlink()
@@ -277,7 +270,7 @@ class Converter:
                         if self.delete_original:
                             file.source.unlink()
                     else:
-                        print(COLOR.GREEN.write(f'Transcoded (DRY RUN): {new_file.name}'))
+                        print(COLOR.GREEN.write(f'Transcoded (DRY RUN): {file.dest.name}'))
                 elif file.skip:
                     print(file.skip)
 
