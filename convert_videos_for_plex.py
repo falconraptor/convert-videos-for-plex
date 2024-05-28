@@ -4,6 +4,7 @@ import subprocess
 import sys
 import timeit
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
 from enum import Enum
 from io import BytesIO
@@ -67,6 +68,7 @@ class File:
         self.duration = 0
         self.format = ''
         self.profile = ''
+        self.checking_info = None
 
     def check_output_exists(self) -> 'File':
         if self.skip:
@@ -95,6 +97,8 @@ class File:
         if not self.media_info.video_tracks:
             self.skip = COLOR.RED.write(f"Skipping (missing info): '{self.name}'")
             return self
+        if self.checking_info:
+            return self.checking_info.result()
         self.format = self.media_info.video_tracks[0].format
         self.profile = self.media_info.video_tracks[0].format_profile
         if not self.duration_min:
@@ -141,6 +145,7 @@ class Converter:
         self.exclude = exclude
         self.stop_larger = stop_larger
         print(COLOR.BLUE.write("TRANSCODING" if self.run else "DRY RUN"))
+        self.check_pool = ProcessPoolExecutor(1)
 
     def get_files(self) -> list[File]:
         files = []
@@ -152,8 +157,7 @@ class Converter:
             skipping = 0
             for source in self.input.glob(f'**/*.{ext}'):
                 file = File(source, self).check_output_exists()
-                # if not file.skip:
-                #     file.check_media_info(self.preset)
+                file.checking_info = self.check_pool.submit(file.check_media_info, self.preset)
                 if not self.force and file.skip:
                     skipping += 1
                     continue
