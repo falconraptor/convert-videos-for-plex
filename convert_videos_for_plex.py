@@ -224,7 +224,7 @@ class Converter:
                             break
                     else:
                         avg = mean(queue_data['times'])
-                    eta = f' [Queue ETA: ~{calc_time(avg * (count - i))}]'
+                    eta = f' [Queue ETA: {calc_time(avg * (count - i))}]'
                 i += 1
                 print(COLOR.BLUE.write(f"Checking [{i:0{count_len}}/{count} ({i/count:.0%})]: '{file.name}'{eta}"))
                 if file.skip and not self.force:
@@ -240,7 +240,7 @@ class Converter:
                     eta = ''
                     duration = file.duration_min
                     if len(time_avg.get(duration, [])) >= 2:
-                        eta = f' [ETA: ~{calc_time(mean(time_avg[duration]))}]'
+                        eta = f' [ETA: {calc_time(mean(time_avg[duration]))}]'
                     print(COLOR.BLUE.write(f"Transcoding: '{file.name}' to '{file.dest.name}'{eta}"))
                     if self.run:
                         start = timeit.default_timer()
@@ -251,7 +251,7 @@ class Converter:
                                 file.dest.unlink()
                             if not isinstance(e, subprocess.CalledProcessError):
                                 raise e
-                            print(COLOR.RED.write(f'HandBrakeCLI exited with code [{e.returncode}] and stderr: {e.stderr}'))
+                            print(COLOR.RED.write(f'HandBrakeCLI exited with code [{e.returncode}] and stderr: {e.stderr.decode()}'))
                             continue
                         time = timeit.default_timer() - start
                         try:
@@ -262,7 +262,7 @@ class Converter:
                         queue_data['durations'].append(file.duration)
                         original_size = file.source.stat().st_size
                         new_size = file.dest.stat().st_size
-                        print(COLOR.GREEN.write(f'Transcoded [~{calc_time(time)}]: {file.dest.name} [{new_size / original_size:03.2%}]'))
+                        print(COLOR.GREEN.write(f'Transcoded [{calc_time(time)}]: {file.dest.name} [{new_size / original_size:03.2%}]'))
                         if self.stop_larger and new_size > original_size:
                             print(COLOR.RED.write('Output > Input: STOPPING'))
                             file.dest.unlink()
@@ -307,9 +307,16 @@ def cli() -> Converter:
 
 def calc_time(seconds: int | float):
     seconds = int(seconds)
-    minutes = seconds // 60
+    minutes = seconds % 60
     hours = seconds // 3600
-    return f'{hours:02}H {minutes:02}M'
+    days = hours // 24
+    hours = hours % 24
+    out = ''
+    if days:
+        out += f'{days:02}D '
+    if hours:
+        out += f'{hours:02}H '
+    return f'{out}{minutes:02}M'
 
 
 if __name__ == '__main__':
