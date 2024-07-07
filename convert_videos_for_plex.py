@@ -132,7 +132,7 @@ class Converter:
         self.sort_type = sort_type
         self.sort_direction = sort_direction
         if not extensions:
-            extensions = ('avi', 'mkv', 'iso', 'img', 'm4v', 'ts')
+            extensions = ('avi', 'mkv', 'm4v', 'ts')
         self.extensions = extensions
         if not exclude:
             exclude = []
@@ -245,6 +245,7 @@ class Converter:
                     if self.run:
                         start = timeit.default_timer()
                         try:
+                            # -O Optimize MP4 files for HTTP streaming (fast start, s.s. rewrite file to place MOOV atom at beginning)
                             subprocess.run([command, '-i', file.source, '-o', file.dest, '--preset', self.preset, '-O'] + subtitle + audio, capture_output=True, check=True)
                         except BaseException as e:
                             if file.dest.exists():
@@ -298,7 +299,7 @@ def cli() -> Converter:
     parser.add_argument('-r', '--run', action='store_true', help='Run transcoding. Exclude for dry run', dest='run')
     parser.add_argument('--sort_type', default='Name', help='Run in sort order [Name]', choices=['Name', 'Duration', 'Filesize', 'Modified'], dest='sort_type')
     parser.add_argument('--sort_direction', default='DESC', help='Sort direction [DESC]', choices=['ASC', 'DESC'], dest='sort_direction')
-    parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, iso, img, m4v, ts]', action='extend', dest='extensions')
+    parser.add_argument('-e', '--extensions', help='File extensions to check [avi, mkv, m4v, ts]', action='extend', dest='extensions')
     parser.add_argument('--exclude', help='Files or directories to exclude (regex)', action='extend', dest='exclude', metavar='FILE_DIR_REGEX')
     parser.add_argument('-f', action='store_true', help='Force overwriting of files if already exist in output destination', dest='force')
     parser.add_argument('--stop_larger', help='Quit if output is larger than input (should only use if sort_type=Filesize)', action='store_true', dest='stop_larger')
@@ -306,11 +307,9 @@ def cli() -> Converter:
 
 
 def calc_time(seconds: int | float):
-    seconds = int(seconds)
-    minutes = seconds % 60
-    hours = seconds // 3600
-    days = hours // 24
-    hours = hours % 24
+    hours = round(seconds % (3600 * 24) / 3600)
+    minutes = round((seconds % 3600) / 60)
+    days = round(seconds / (3600 * 24))
     out = ''
     if days:
         out += f'{days:02}D '
